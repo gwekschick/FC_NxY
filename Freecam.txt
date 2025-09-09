@@ -1,0 +1,659 @@
+-- Freecam Mobile dengan GUI Lengkap dan Pergerakan Smooth
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local ContextActionService = game:GetService("ContextActionService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local camera = workspace.CurrentCamera
+
+-- Freecam state
+local freecamEnabled = false
+local freecamConnection
+local originalCameraType = camera.CameraType
+local originalCameraSubject = camera.CameraSubject
+local originalFov = camera.FieldOfView
+
+-- Movement variables
+local moveVector = Vector3.new(0, 0, 0)
+local lookVector = Vector2.new(0, 0)
+local speed = 10
+local sensitivity = 0.5
+local fov = originalFov
+local minFov = 5
+local maxFov = 120
+
+-- UI state
+local controlsVisible = true
+local mainGuiVisible = true
+
+-- Smooth movement variables
+local currentVelocity = Vector3.new(0, 0, 0)
+local targetVelocity = Vector3.new(0, 0, 0)
+local acceleration = 15
+local deceleration = 20
+
+-- Create main freecam GUI
+local freecamGui = Instance.new("ScreenGui")
+freecamGui.Name = "NxY FreeCam"
+freecamGui.Parent = playerGui
+freecamGui.ResetOnSpawn = false
+
+-- Main container (can be hidden)
+local mainContainer = Instance.new("Frame")
+mainContainer.Size = UDim2.new(0, 200, 0, 150) -- Increased height to accommodate new elements
+mainContainer.Position = UDim2.new(0, 20, 0, 20)
+mainContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+mainContainer.BackgroundTransparency = 0.3
+mainContainer.BorderSizePixel = 0
+mainContainer.Parent = freecamGui
+
+local containerCorner = Instance.new("UICorner")
+containerCorner.CornerRadius = UDim.new(0, 10)
+containerCorner.Parent = mainContainer
+
+-- Title
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 30)
+title.Position = UDim2.new(0, 0, 0, 0)
+title.Text = "NxY FreeCam"
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = mainContainer
+
+-- Toggle freecam button
+local toggleFreecamButton = Instance.new("TextButton")
+toggleFreecamButton.Size = UDim2.new(0, 160, 0, 30)
+toggleFreecamButton.Position = UDim2.new(0, 20, 0, 35)
+toggleFreecamButton.Text = "Freecam: OFF"
+toggleFreecamButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleFreecamButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+toggleFreecamButton.BorderSizePixel = 0
+toggleFreecamButton.Font = Enum.Font.Gotham
+toggleFreecamButton.TextSize = 14
+toggleFreecamButton.Parent = mainContainer
+
+local toggleFreecamCorner = Instance.new("UICorner")
+toggleFreecamCorner.CornerRadius = UDim.new(0, 5)
+toggleFreecamCorner.Parent = toggleFreecamButton
+
+-- Toggle controls button
+local toggleControlsButton = Instance.new("TextButton")
+toggleControlsButton.Size = UDim2.new(0, 160, 0, 30)
+toggleControlsButton.Position = UDim2.new(0, 20, 0, 70)
+toggleControlsButton.Text = "Hide Controls"
+toggleControlsButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleControlsButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+toggleControlsButton.BorderSizePixel = 0
+toggleControlsButton.Font = Enum.Font.Gotham
+toggleControlsButton.TextSize = 14
+toggleControlsButton.Parent = mainContainer
+
+local toggleControlsCorner = Instance.new("UICorner")
+toggleControlsCorner.CornerRadius = UDim.new(0, 5)
+toggleControlsCorner.Parent = toggleControlsButton
+
+-- Speed slider
+local speedSliderContainer = Instance.new("Frame")
+speedSliderContainer.Size = UDim2.new(0, 160, 0, 30)
+speedSliderContainer.Position = UDim2.new(0, 20, 0, 105)
+speedSliderContainer.BackgroundTransparency = 1
+speedSliderContainer.Parent = mainContainer
+
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(0, 70, 0, 30)
+speedLabel.Position = UDim2.new(0, 0, 0, 0)
+speedLabel.Text = "Speed: " .. speed
+speedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedLabel.BackgroundTransparency = 1
+speedLabel.Font = Enum.Font.Gotham
+speedLabel.TextSize = 14
+speedLabel.TextXAlignment = Enum.TextXAlignment.Left
+speedLabel.Parent = speedSliderContainer
+
+local speedSlider = Instance.new("Frame")
+speedSlider.Size = UDim2.new(0, 80, 0, 5)
+speedSlider.Position = UDim2.new(0, 75, 0, 12)
+speedSlider.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+speedSlider.BorderSizePixel = 0
+speedSlider.Parent = speedSliderContainer
+
+local speedSliderCorner = Instance.new("UICorner")
+speedSliderCorner.CornerRadius = UDim.new(1, 0)
+speedSliderCorner.Parent = speedSlider
+
+local speedThumb = Instance.new("TextButton")
+speedThumb.Size = UDim2.new(0, 15, 0, 15)
+speedThumb.Position = UDim2.new((speed - 1) / 49, 0, 0, -5) -- Map speed 1-50 to 0-1 position
+speedThumb.Text = ""
+speedThumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+speedThumb.BorderSizePixel = 0
+speedThumb.Parent = speedSlider
+
+local speedThumbCorner = Instance.new("UICorner")
+speedThumbCorner.CornerRadius = UDim.new(1, 0)
+speedThumbCorner.Parent = speedThumb
+
+-- Close button
+local closeButton = Instance.new("TextButton")
+closeButton.Size = UDim2.new(0, 160, 0, 30)
+closeButton.Position = UDim2.new(0, 20, 0, 140)
+closeButton.Text = "CLOSE"
+closeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeButton.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+closeButton.BorderSizePixel = 0
+closeButton.Font = Enum.Font.GothamBold
+closeButton.TextSize = 14
+closeButton.Parent = mainContainer
+
+local closeButtonCorner = Instance.new("UICorner")
+closeButtonCorner.CornerRadius = UDim.new(0, 5)
+closeButtonCorner.Parent = closeButton
+
+-- Show/hide GUI button (always visible)
+local showHideButton = Instance.new("TextButton")
+showHideButton.Size = UDim2.new(0, 40, 0, 40)
+showHideButton.Position = UDim2.new(0, 20, 0, 20)
+showHideButton.Text = "☰"
+showHideButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+showHideButton.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+showHideButton.BorderSizePixel = 0
+showHideButton.Font = Enum.Font.GothamBold
+showHideButton.TextSize = 20
+showHideButton.ZIndex = 10
+showHideButton.Parent = freecamGui
+
+local showHideCorner = Instance.new("UICorner")
+showHideCorner.CornerRadius = UDim.new(0, 10)
+showHideCorner.Parent = showHideButton
+
+-- Movement controls (left side) - Fixed position, not draggable
+local movementFrame = Instance.new("Frame")
+movementFrame.Size = UDim2.new(0, 150, 0, 150)
+movementFrame.Position = UDim2.new(0, 20, 1, -170)
+movementFrame.BackgroundTransparency = 1
+movementFrame.Parent = freecamGui
+
+-- Up button
+local upButton = Instance.new("TextButton")
+upButton.Size = UDim2.new(0, 50, 0, 50)
+upButton.Position = UDim2.new(0.5, -25, 0, 0)
+upButton.Text = "↑"
+upButton.TextSize = 20
+upButton.Font = Enum.Font.GothamBold
+upButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+upButton.BackgroundTransparency = 0.7
+upButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+upButton.Parent = movementFrame
+
+local upCorner = Instance.new("UICorner")
+upCorner.CornerRadius = UDim.new(0, 10)
+upCorner.Parent = upButton
+
+-- Left button
+local leftButton = Instance.new("TextButton")
+leftButton.Size = UDim2.new(0, 50, 0, 50)
+leftButton.Position = UDim2.new(0, 0, 0.5, -25)
+leftButton.Text = "←"
+leftButton.TextSize = 20
+leftButton.Font = Enum.Font.GothamBold
+leftButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+leftButton.BackgroundTransparency = 0.7
+leftButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+leftButton.Parent = movementFrame
+
+local leftCorner = Instance.new("UICorner")
+leftCorner.CornerRadius = UDim.new(0, 10)
+leftCorner.Parent = leftButton
+
+-- Down button
+local downButton = Instance.new("TextButton")
+downButton.Size = UDim2.new(0, 50, 0, 50)
+downButton.Position = UDim2.new(0.5, -25, 1, -50)
+downButton.Text = "↓"
+downButton.TextSize = 20
+downButton.Font = Enum.Font.GothamBold
+downButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+downButton.BackgroundTransparency = 0.7
+downButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+downButton.Parent = movementFrame
+
+local downCorner = Instance.new("UICorner")
+downCorner.CornerRadius = UDim.new(0, 10)
+downCorner.Parent = downButton
+
+-- Right button
+local rightButton = Instance.new("TextButton")
+rightButton.Size = UDim2.new(0, 50, 0, 50)
+rightButton.Position = UDim2.new(1, -50, 0.5, -25)
+rightButton.Text = "→"
+rightButton.TextSize = 20
+rightButton.Font = Enum.Font.GothamBold
+rightButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+rightButton.BackgroundTransparency = 0.7
+rightButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+rightButton.Parent = movementFrame
+
+local rightCorner = Instance.new("UICorner")
+rightCorner.CornerRadius = UDim.new(0, 10)
+rightCorner.Parent = rightButton
+
+-- Zoom controls (right side)
+local zoomFrame = Instance.new("Frame")
+zoomFrame.Size = UDim2.new(0, 60, 0, 120)
+zoomFrame.Position = UDim2.new(1, -80, 1, -130)
+zoomFrame.BackgroundTransparency = 1
+zoomFrame.Parent = freecamGui
+
+-- Zoom in button
+local zoomInButton = Instance.new("TextButton")
+zoomInButton.Size = UDim2.new(0, 60, 0, 60)
+zoomInButton.Position = UDim2.new(0, 0, 0, 0)
+zoomInButton.Text = "+"
+zoomInButton.TextSize = 30
+zoomInButton.Font = Enum.Font.GothamBold
+zoomInButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+zoomInButton.BackgroundTransparency = 0.7
+zoomInButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+zoomInButton.Parent = zoomFrame
+
+local zoomInCorner = Instance.new("UICorner")
+zoomInCorner.CornerRadius = UDim.new(0, 10)
+zoomInCorner.Parent = zoomInButton
+
+-- Zoom out button
+local zoomOutButton = Instance.new("TextButton")
+zoomOutButton.Size = UDim2.new(0, 60, 0, 60)
+zoomOutButton.Position = UDim2.new(0, 0, 1, -60)
+zoomOutButton.Text = "-"
+zoomOutButton.TextSize = 30
+zoomOutButton.Font = Enum.Font.GothamBold
+zoomOutButton.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+zoomOutButton.BackgroundTransparency = 0.7
+zoomOutButton.TextColor3 = Color3.fromRGB(0, 0, 0)
+zoomOutButton.Parent = zoomFrame
+
+local zoomOutCorner = Instance.new("UICorner")
+zoomOutCorner.CornerRadius = UDim.new(0, 10)
+zoomOutCorner.Parent = zoomOutButton
+
+-- Movement button states
+local buttonStates = {
+    up = false,
+    down = false,
+    left = false,
+    right = false
+}
+
+-- Function to disable character movement
+local function disableCharacterMovement()
+    if player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 0
+        end
+    end
+    
+    -- Disable mobile movement
+    ContextActionService:BindAction("FreecamBlockMovement", function()
+        return Enum.ContextActionResult.Sink
+    end, false, Enum.UserInputType.Touch)
+end
+
+-- Function to enable character movement
+local function enableCharacterMovement()
+    if player.Character then
+        local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+        if humanoid then
+            humanoid.WalkSpeed = 16
+        end
+    end
+    
+    -- Enable mobile movement
+    ContextActionService:UnbindAction("FreecamBlockMovement")
+end
+
+-- Function to handle button press
+local function handleButtonPress(button, direction)
+    button.MouseButton1Down:Connect(function()
+        buttonStates[direction] = true
+        button.BackgroundTransparency = 0.3
+    end)
+    
+    button.MouseButton1Up:Connect(function()
+        buttonStates[direction] = false
+        button.BackgroundTransparency = 0.7
+    end)
+    
+    button.MouseLeave:Connect(function()
+        buttonStates[direction] = false
+        button.BackgroundTransparency = 0.7
+    end)
+end
+
+-- Set up button handlers
+handleButtonPress(upButton, "up")
+handleButtonPress(downButton, "down")
+handleButtonPress(leftButton, "left")
+handleButtonPress(rightButton, "right")
+
+-- Smooth zoom function
+local function smoothZoom(targetFov)
+    local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(camera, tweenInfo, {FieldOfView = targetFov})
+    tween:Play()
+end
+
+-- Zoom functions
+zoomInButton.MouseButton1Click:Connect(function()
+    fov = math.max(minFov, fov - 5)
+    smoothZoom(fov)
+end)
+
+zoomOutButton.MouseButton1Click:Connect(function()
+    fov = math.min(maxFov, fov + 5)
+    smoothZoom(fov)
+end)
+
+-- Touch handling for camera look
+local function handleCameraTouch(input)
+    if not freecamEnabled or input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
+    
+    -- Check if touch is on any UI element
+    local touchPos = input.Position
+    local isOnUI = false
+    
+    for _, guiElement in ipairs({mainContainer, movementFrame, zoomFrame, showHideButton}) do
+        if guiElement.Visible then
+            local absPos = guiElement.AbsolutePosition
+            local absSize = guiElement.AbsoluteSize
+            if touchPos.X >= absPos.X and touchPos.X <= absPos.X + absSize.X and
+               touchPos.Y >= absPos.Y and touchPos.Y <= absPos.Y + absSize.Y then
+                isOnUI = true
+                break
+            end
+        end
+    end
+    
+    if not isOnUI then
+        if input.UserInputState == Enum.UserInputState.Begin then
+            dragStart = input.Position
+        elseif input.UserInputState == Enum.UserInputState.Change then
+            local delta = input.Position - dragStart
+            lookVector = lookVector + Vector2.new(delta.X, delta.Y) * sensitivity
+            lookVector = Vector2.new(lookVector.X, math.clamp(lookVector.Y, -80, 80))
+            dragStart = input.Position
+        end
+    end
+end
+
+-- Smooth movement calculation
+local function calculateSmoothMovement(dt)
+    -- Calculate target velocity based on button states
+    targetVelocity = Vector3.new(0, 0, 0)
+    
+    if buttonStates.up then
+        targetVelocity = targetVelocity + Vector3.new(0, 0, -1)
+    end
+    if buttonStates.down then
+        targetVelocity = targetVelocity + Vector3.new(0, 0, 1)
+    end
+    if buttonStates.left then
+        targetVelocity = targetVelocity + Vector3.new(-1, 0, 0)
+    end
+    if buttonStates.right then
+        targetVelocity = targetVelocity + Vector3.new(1, 0, 0)
+    end
+    
+    -- Normalize if diagonal movement
+    if targetVelocity.Magnitude > 0 then
+        targetVelocity = targetVelocity.Unit * speed
+    end
+    
+    -- Apply acceleration/deceleration
+    if targetVelocity.Magnitude > 0 then
+        currentVelocity = currentVelocity:Lerp(targetVelocity, acceleration * dt)
+    else
+        currentVelocity = currentVelocity:Lerp(Vector3.new(0, 0, 0), deceleration * dt)
+    end
+    
+    -- Apply small deadzone to prevent drifting
+    if currentVelocity.Magnitude < 0.1 then
+        currentVelocity = Vector3.new(0, 0, 0)
+    end
+    
+    return currentVelocity
+end
+
+-- Main freecam update function
+local function updateFreecam(dt)
+    if not freecamEnabled then return end
+    
+    -- Calculate smooth movement
+    local smoothMoveVector = calculateSmoothMovement(dt)
+    
+    -- Build rotation matrix from look angles
+    local yawRotation = CFrame.Angles(0, math.rad(-lookVector.X), 0)
+    local pitchRotation = CFrame.Angles(math.rad(-lookVector.Y), 0, 0)
+    local combinedRotation = yawRotation * pitchRotation
+    
+    -- Calculate movement direction based on rotation
+    local rotatedMove = combinedRotation:VectorToWorldSpace(smoothMoveVector)
+    
+    -- Update camera position
+    local currentPosition = camera.CFrame.Position
+    local newPosition = currentPosition + (rotatedMove * dt)
+    
+    -- Set final camera CFrame with smooth interpolation
+    local targetCFrame = CFrame.new(newPosition) * combinedRotation
+    camera.CFrame = camera.CFrame:Lerp(targetCFrame, 10 * dt)
+end
+
+-- Function to enable freecam
+local function enableFreecam()
+    if freecamEnabled then return end
+    
+    freecamEnabled = true
+    toggleFreecamButton.Text = "Freecam: ON"
+    toggleFreecamButton.BackgroundColor3 = Color3.fromRGB(60, 220, 60)
+    
+    -- Store original camera settings
+    originalCameraType = camera.CameraType
+    originalCameraSubject = camera.CameraSubject
+    originalFov = camera.FieldOfView
+    
+    -- Set camera to scriptable
+    camera.CameraType = Enum.CameraType.Scriptable
+    camera.CameraSubject = nil
+    
+    -- Set initial FOV
+    fov = originalFov
+    camera.FieldOfView = fov
+    
+    -- Disable character movement
+    disableCharacterMovement()
+    
+    -- Start update loop
+    freecamConnection = RunService.RenderStepped:Connect(updateFreecam)
+    
+    -- Connect touch handlers
+    UserInputService.TouchStarted:Connect(handleCameraTouch)
+    UserInputService.TouchMoved:Connect(handleCameraTouch)
+    UserInputService.TouchEnded:Connect(handleCameraTouch)
+    
+    print("Freecam enabled! Use arrow buttons to move and touch screen to look around.")
+end
+
+-- Function to disable freecam
+local function disableFreecam()
+    if not freecamEnabled then return end
+    
+    freecamEnabled = false
+    toggleFreecamButton.Text = "Freecam: OFF"
+    toggleFreecamButton.BackgroundColor3 = Color3.fromRGB(220, 60, 60)
+    
+    -- Restore original camera settings
+    camera.CameraType = originalCameraType
+    camera.CameraSubject = originalCameraSubject
+    
+    -- Reset FOV to original value with smooth transition
+    smoothZoom(originalFov)
+    fov = originalFov
+    
+    -- Enable character movement
+    enableCharacterMovement()
+    
+    -- Disconnect update loop
+    if freecamConnection then
+        freecamConnection:Disconnect()
+        freecamConnection = nil
+    end
+    
+    -- Reset variables
+    moveVector = Vector3.new(0, 0, 0)
+    lookVector = Vector2.new(0, 0)
+    currentVelocity = Vector3.new(0, 0, 0)
+    targetVelocity = Vector3.new(0, 0, 0)
+    
+    -- Reset button states
+    for button, _ in pairs(buttonStates) do
+        buttonStates[button] = false
+    end
+    
+    -- Reset button appearances
+    upButton.BackgroundTransparency = 0.7
+    downButton.BackgroundTransparency = 0.7
+    leftButton.BackgroundTransparency = 0.7
+    rightButton.BackgroundTransparency = 0.7
+    
+    print("Freecam disabled!")
+end
+
+-- Function to completely close and destroy the freecam GUI
+local function closeFreecam()
+    -- Disable freecam if active
+    if freecamEnabled then
+        disableFreecam()
+    end
+    
+    -- Destroy all GUI elements
+    freecamGui:Destroy()
+    
+    print("Freecam GUI completely closed. Execute the script again to reopen.")
+end
+
+-- Toggle freecam
+local function toggleFreecam()
+    if freecamEnabled then
+        disableFreecam()
+    else
+        enableFreecam()
+    end
+end
+
+-- Toggle controls visibility
+local function toggleControls()
+    controlsVisible = not controlsVisible
+    movementFrame.Visible = controlsVisible
+    zoomFrame.Visible = controlsVisible
+    
+    if controlsVisible then
+        toggleControlsButton.Text = "Hide Controls"
+    else
+        toggleControlsButton.Text = "Show Controls"
+    end
+end
+
+-- Toggle main GUI visibility
+local function toggleMainGui()
+    mainGuiVisible = not mainGuiVisible
+    mainContainer.Visible = mainGuiVisible
+    
+    if mainGuiVisible then
+        showHideButton.Text = "☰"
+    else
+        showHideButton.Text = "☰"
+    end
+end
+
+-- Speed slider functionality (updated for range 1-50)
+local function setupSpeedSlider()
+    local dragging = false
+    
+    local function updateSpeed(value)
+        -- Map position (0-1) to speed (1-50)
+        speed = math.floor(1 + value * 49)
+        speedLabel.Text = "Speed: " .. speed
+    end
+    
+    -- Function to handle slider input
+    local function handleSliderInput(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            local xOffset = input.Position.X - speedSlider.AbsolutePosition.X
+            local relativeX = math.clamp(xOffset / speedSlider.AbsoluteSize.X, 0, 1)
+            speedThumb.Position = UDim2.new(relativeX, 0, 0, -5)
+            updateSpeed(relativeX)
+        end
+    end
+    
+    -- Connect events to the slider track
+    speedSlider.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+            handleSliderInput(input)
+        end
+    end)
+    
+    speedSlider.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            handleSliderInput(input)
+        end
+    end)
+    
+    speedSlider.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+    
+    -- Connect events to the thumb button
+    speedThumb.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true
+        end
+    end)
+    
+    speedThumb.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
+            handleSliderInput(input)
+        end
+    end)
+    
+    speedThumb.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+        end
+    end)
+end
+
+-- Set up the speed slider
+setupSpeedSlider()
+
+-- Connect button events
+toggleFreecamButton.MouseButton1Click:Connect(toggleFreecam)
+toggleControlsButton.MouseButton1Click:Connect(toggleControls)
+showHideButton.MouseButton1Click:Connect(toggleMainGui)
+closeButton.MouseButton1Click:Connect(closeFreecam)
+
+-- Initialize UI
+movementFrame.Visible = controlsVisible
+zoomFrame.Visible = controlsVisible
+mainContainer.Visible = mainGuiVisible
+
+print("Freecam Mobile Loaded! Use the menu button to show/hide controls.")
