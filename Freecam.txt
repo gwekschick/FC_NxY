@@ -35,6 +35,11 @@ local targetVelocity = Vector3.new(0, 0, 0)
 local acceleration = 15
 local deceleration = 20
 
+-- Zoom variables
+local zoomInPressed = false
+local zoomOutPressed = false
+local zoomSpeed = 30 -- degrees per second
+
 -- Create main freecam GUI
 local freecamGui = Instance.new("ScreenGui")
 freecamGui.Name = "NxY FreeCam"
@@ -43,7 +48,7 @@ freecamGui.ResetOnSpawn = false
 
 -- Main container (can be hidden)
 local mainContainer = Instance.new("Frame")
-mainContainer.Size = UDim2.new(0, 200, 0, 150) -- Increased height to accommodate new elements
+mainContainer.Size = UDim2.new(0, 200, 0, 150)
 mainContainer.Position = UDim2.new(0, 20, 0, 20)
 mainContainer.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 mainContainer.BackgroundTransparency = 0.3
@@ -128,7 +133,7 @@ speedSliderCorner.Parent = speedSlider
 
 local speedThumb = Instance.new("TextButton")
 speedThumb.Size = UDim2.new(0, 15, 0, 15)
-speedThumb.Position = UDim2.new((speed - 1) / 49, 0, 0, -5) -- Map speed 1-50 to 0-1 position
+speedThumb.Position = UDim2.new((speed - 1) / 49, 0, 0, -5)
 speedThumb.Text = ""
 speedThumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 speedThumb.BorderSizePixel = 0
@@ -348,16 +353,47 @@ local function smoothZoom(targetFov)
     tween:Play()
 end
 
--- Zoom functions
-zoomInButton.MouseButton1Click:Connect(function()
-    fov = math.max(minFov, fov - 5)
-    smoothZoom(fov)
-end)
+-- Function to handle zoom button press and hold
+local function setupZoomButton(button, isZoomIn)
+    local function onInputBegin(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if isZoomIn then
+                zoomInPressed = true
+            else
+                zoomOutPressed = true
+            end
+            button.BackgroundTransparency = 0.3
+        end
+    end
+    
+    local function onInputEnd(input)
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+            if isZoomIn then
+                zoomInPressed = false
+            else
+                zoomOutPressed = false
+            end
+            button.BackgroundTransparency = 0.7
+        end
+    end
+    
+    button.InputBegan:Connect(onInputBegin)
+    button.InputEnded:Connect(onInputEnd)
+    
+    -- Also handle mouse leave
+    button.MouseLeave:Connect(function()
+        if isZoomIn then
+            zoomInPressed = false
+        else
+            zoomOutPressed = false
+        end
+        button.BackgroundTransparency = 0.7
+    end)
+end
 
-zoomOutButton.MouseButton1Click:Connect(function()
-    fov = math.min(maxFov, fov + 5)
-    smoothZoom(fov)
-end)
+-- Set up zoom buttons
+setupZoomButton(zoomInButton, true)
+setupZoomButton(zoomOutButton, false)
 
 -- Touch handling for camera look
 local function handleCameraTouch(input)
@@ -431,12 +467,28 @@ local function calculateSmoothMovement(dt)
     return currentVelocity
 end
 
+-- Handle continuous zoom
+local function handleContinuousZoom(dt)
+    if not freecamEnabled then return end
+    
+    if zoomInPressed then
+        fov = math.max(minFov, fov - zoomSpeed * dt)
+        camera.FieldOfView = fov
+    elseif zoomOutPressed then
+        fov = math.min(maxFov, fov + zoomSpeed * dt)
+        camera.FieldOfView = fov
+    end
+end
+
 -- Main freecam update function
 local function updateFreecam(dt)
     if not freecamEnabled then return end
     
     -- Calculate smooth movement
     local smoothMoveVector = calculateSmoothMovement(dt)
+    
+    -- Handle continuous zoom
+    handleContinuousZoom(dt)
     
     -- Build rotation matrix from look angles
     local yawRotation = CFrame.Angles(0, math.rad(-lookVector.X), 0)
@@ -526,11 +578,17 @@ local function disableFreecam()
         buttonStates[button] = false
     end
     
+    -- Reset zoom states
+    zoomInPressed = false
+    zoomOutPressed = false
+    
     -- Reset button appearances
     upButton.BackgroundTransparency = 0.7
     downButton.BackgroundTransparency = 0.7
     leftButton.BackgroundTransparency = 0.7
     rightButton.BackgroundTransparency = 0.7
+    zoomInButton.BackgroundTransparency = 0.7
+    zoomOutButton.BackgroundTransparency = 0.7
     
     print("Freecam disabled!")
 end
@@ -550,110 +608,4 @@ end
 
 -- Toggle freecam
 local function toggleFreecam()
-    if freecamEnabled then
-        disableFreecam()
-    else
-        enableFreecam()
-    end
-end
-
--- Toggle controls visibility
-local function toggleControls()
-    controlsVisible = not controlsVisible
-    movementFrame.Visible = controlsVisible
-    zoomFrame.Visible = controlsVisible
-    
-    if controlsVisible then
-        toggleControlsButton.Text = "Hide Controls"
-    else
-        toggleControlsButton.Text = "Show Controls"
-    end
-end
-
--- Toggle main GUI visibility
-local function toggleMainGui()
-    mainGuiVisible = not mainGuiVisible
-    mainContainer.Visible = mainGuiVisible
-    
-    if mainGuiVisible then
-        showHideButton.Text = "☰"
-    else
-        showHideButton.Text = "☰"
-    end
-end
-
--- Speed slider functionality (updated for range 1-50)
-local function setupSpeedSlider()
-    local dragging = false
-    
-    local function updateSpeed(value)
-        -- Map position (0-1) to speed (1-50)
-        speed = math.floor(1 + value * 49)
-        speedLabel.Text = "Speed: " .. speed
-    end
-    
-    -- Function to handle slider input
-    local function handleSliderInput(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            local xOffset = input.Position.X - speedSlider.AbsolutePosition.X
-            local relativeX = math.clamp(xOffset / speedSlider.AbsoluteSize.X, 0, 1)
-            speedThumb.Position = UDim2.new(relativeX, 0, 0, -5)
-            updateSpeed(relativeX)
-        end
-    end
-    
-    -- Connect events to the slider track
-    speedSlider.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-            handleSliderInput(input)
-        end
-    end)
-    
-    speedSlider.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-            handleSliderInput(input)
-        end
-    end)
-    
-    speedSlider.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-    
-    -- Connect events to the thumb button
-    speedThumb.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = true
-        end
-    end)
-    
-    speedThumb.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseMovement) then
-            handleSliderInput(input)
-        end
-    end)
-    
-    speedThumb.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-            dragging = false
-        end
-    end)
-end
-
--- Set up the speed slider
-setupSpeedSlider()
-
--- Connect button events
-toggleFreecamButton.MouseButton1Click:Connect(toggleFreecam)
-toggleControlsButton.MouseButton1Click:Connect(toggleControls)
-showHideButton.MouseButton1Click:Connect(toggleMainGui)
-closeButton.MouseButton1Click:Connect(closeFreecam)
-
--- Initialize UI
-movementFrame.Visible = controlsVisible
-zoomFrame.Visible = controlsVisible
-mainContainer.Visible = mainGuiVisible
-
-print("Freecam Mobile Loaded! Use the menu button to show/hide controls.")
+   
